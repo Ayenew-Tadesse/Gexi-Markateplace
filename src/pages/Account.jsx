@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { AppShell, Empty } from '../components/Layout'
 import { ProductGrid, Stepper } from '../components/Products'
-import { CartIcon, CheckIcon, ChevronIcon, HeartIcon, ReceiptIcon, StoreIcon, TrashIcon } from '../components/Icons'
+import { CartIcon, CheckIcon, ChevronIcon, HeartIcon, ReceiptIcon, StoreIcon, TrashIcon } from '../shared/Icons'
 import { useStore } from '../context/StoreContext'
-import { Link, navigate } from '../router'
-import { byId, formatPrice } from '../data/products'
+import { Link, navigate } from '../shared/router'
+import { byId, liveById, formatPrice } from '../data/products'
+import { OrderChat } from '../shared/Chat'
+import { STATUS_FLOW, statusText, unreadCount } from '../shared/db'
 
 const DELIVERY_FEE = 4.99
 
@@ -43,18 +45,24 @@ export function CartPage() {
           {cart.map((item) => {
             const p = byId(item.id)
             if (!p) return null
+            const live = liveById(item.id)
+            const unavailable = !live || live.stock <= 0
             return (
-              <li key={item.id + item.color} className="cart-item">
+              <li key={item.id + item.color} className={'cart-item' + (unavailable ? ' cart-item--off' : '')}>
                 <Link to={`/product/${p.id}`} className="cart-item__img">
                   <img src={p.image} alt="" />
                 </Link>
                 <div className="cart-item__body">
                   <Link to={`/product/${p.id}`} className="cart-item__name">{p.name}</Link>
                   <span className="muted">Color: {item.color}</span>
+                  {unavailable ? (
+                    <span className="cart-item__warn">{live ? 'Sold out' : 'No longer available'} · not included in your order</span>
+                  ) : (
                   <div className="cart-item__row">
                     <Stepper value={item.qty} max={p.stock} onChange={(n) => setQty(item.id, item.color, Math.min(n, p.stock))} />
                     <span className="price">{formatPrice(p.price * item.qty)}</span>
                   </div>
+                  )}
                 </div>
                 <button type="button" className="icon-btn icon-btn--muted" aria-label={`Remove ${p.name}`} onClick={() => setQty(item.id, item.color, 0)}>
                   <TrashIcon size={20} />
@@ -85,7 +93,7 @@ export function CartPage() {
             <div><dt>{method === 'pickup' ? 'Pickup' : 'Delivery'}</dt><dd>{fee ? formatPrice(fee) : 'Free'}</dd></div>
             <div className="summary__total"><dt>Total</dt><dd>{formatPrice(total)}</dd></div>
           </dl>
-          <button type="button" className="btn btn--teal btn--lg btn--block" onClick={checkout}>
+          <button type="button" className="btn btn--teal btn--lg btn--block" onClick={checkout} disabled={cartSubtotal <= 0}>
             Place order
           </button>
           <p className="muted small">Demo checkout — no payment is taken.</p>
@@ -111,15 +119,6 @@ export function SavedPage() {
   )
 }
 
-// Demo: status advances with time so the tracker feels alive.
-function statusOf(order) {
-  const mins = (Date.now() - new Date(order.date)) / 60000
-  if (mins < 2) return 0
-  if (mins < 10) return 1
-  return 2
-}
-const STEPS = (method) => ['Processing', method === 'delivery' ? 'On the way' : 'Ready for pickup', method === 'delivery' ? 'Delivered' : 'Picked up']
-
 const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 
 export function OrdersPage() {
@@ -131,18 +130,22 @@ export function OrdersPage() {
           <ul className="orders">
             {orders.map((o) => {
               const count = o.items.reduce((n, i) => n + i.qty, 0)
+              const unread = unreadCount('customer', o.id)
               return (
                 <li key={o.id}>
                   <Link to={'/orders/' + o.id} className="order-card">
                     <div className="order-card__thumbs">
                       {o.items.slice(0, 3).map((i) => (
-                        <img key={i.id + i.color} src={byId(i.id)?.image} alt="" />
+                        <img key={i.id + i.color} src={i.image || byId(i.id)?.image} alt="" />
                       ))}
                     </div>
                     <div className="order-card__body">
                       <strong>Order #{o.id}</strong>
                       <span className="muted">{fmtDate(o.date)} · {count} {count === 1 ? 'item' : 'items'}</span>
-                      <span className={'status status--' + statusOf(o)}>{STEPS(o.method)[statusOf(o)]}</span>
+                      <span className="order-card__tags">
+                        <span className={'status status--' + o.status}>{statusText(o)}</span>
+                        {unread > 0 && <span className="status status--msg">{unread} new {unread === 1 ? 'message' : 'messages'}</span>}
+                      </span>
                     </div>
                     <span className="price">{formatPrice(o.total)}</span>
                     <ChevronIcon size={18} />
@@ -168,49 +171,66 @@ export function OrderDetailPage({ id }) {
         <div className="container"><Empty icon={ReceiptIcon} title="Order not found" action={<Link className="btn btn--teal" to="/orders">All orders</Link>} /></div>
       </AppShell>
     )
-  const step = statusOf(o)
-  const steps = STEPS(o.method)
+  const cancelled = o.status === 'cancelled'
+  const step = STATUS_FLOW.indexOf(o.status)
+  const justPlaced = o.status === 'new' && Date.now() - new Date(o.date) < 5 * 60000
   return (
     <AppShell active="/orders" title={'Order #' + o.id}>
-      <div className="container stack order-detail">
-        <div className="confirm">
-          <span className="confirm__icon"><CheckIcon size={28} /></span>
-          <div>
-            <h2>Thank you! Your order is placed.</h2>
-            <p className="muted">Placed {fmtDate(o.date)} · {o.method === 'delivery' ? 'Delivery' : 'Pickup at the Gexi store'}</p>
-          </div>
+      <div className="container order-detail">
+        <div className="stack">
+          {cancelled ? (
+            <div className="confirm confirm--cancel">
+              <span className="confirm__icon"><TrashIcon size={24} /></span>
+              <div>
+                <h2>This order was cancelled</h2>
+                <p className="muted">{o.cancelReason || 'The seller cancelled this order.'} You have not been charged.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="confirm">
+              <span className="confirm__icon"><CheckIcon size={28} /></span>
+              <div>
+                <h2>{justPlaced ? 'Thank you! Your order is placed.' : statusText(o)}</h2>
+                <p className="muted">Placed {fmtDate(o.date)} · {o.method === 'delivery' ? 'Delivery' : 'Pickup at the Gexi store'}</p>
+              </div>
+            </div>
+          )}
+          {!cancelled && (
+            <ol className="tracker">
+              {STATUS_FLOW.map((s, i) => (
+                <li key={s} className={i <= step ? 'done' : ''}>
+                  <span className="tracker__dot">{i <= step && <CheckIcon size={14} />}</span>
+                  {statusText({ status: s, method: o.method })}
+                </li>
+              ))}
+            </ol>
+          )}
+          <ul className="cart__list">
+            {o.items.map((i) => {
+              const p = byId(i.id)
+              return (
+                <li key={i.id + i.color} className="cart-item">
+                  <Link to={`/product/${i.id}`} className="cart-item__img"><img src={i.image || p?.image} alt="" /></Link>
+                  <div className="cart-item__body">
+                    <span className="cart-item__name">{i.name || p?.name}</span>
+                    <span className="muted">Color: {i.color} · Qty {i.qty}</span>
+                  </div>
+                  <span className="price">{formatPrice((i.price ?? p?.price) * i.qty)}</span>
+                </li>
+              )
+            })}
+          </ul>
+          <dl className="summary__rows summary--plain">
+            <div><dt>Subtotal</dt><dd>{formatPrice(o.subtotal)}</dd></div>
+            {o.discount > 0 && <div className="summary__discount"><dt>First order −50%</dt><dd>−{formatPrice(o.discount)}</dd></div>}
+            <div><dt>{o.method === 'delivery' ? 'Delivery' : 'Pickup'}</dt><dd>{o.fee ? formatPrice(o.fee) : 'Free'}</dd></div>
+            <div className="summary__total"><dt>Total</dt><dd>{formatPrice(o.total)}</dd></div>
+          </dl>
         </div>
-        <ol className="tracker">
-          {steps.map((s, i) => (
-            <li key={s} className={i <= step ? 'done' : ''}>
-              <span className="tracker__dot">{i <= step && <CheckIcon size={14} />}</span>
-              {s}
-            </li>
-          ))}
-        </ol>
-        <ul className="cart__list">
-          {o.items.map((i) => {
-            const p = byId(i.id)
-            if (!p) return null
-            return (
-              <li key={i.id + i.color} className="cart-item">
-                <Link to={`/product/${p.id}`} className="cart-item__img"><img src={p.image} alt="" /></Link>
-                <div className="cart-item__body">
-                  <span className="cart-item__name">{p.name}</span>
-                  <span className="muted">Color: {i.color} · Qty {i.qty}</span>
-                </div>
-                <span className="price">{formatPrice(p.price * i.qty)}</span>
-              </li>
-            )
-          })}
-        </ul>
-        <dl className="summary__rows summary--plain">
-          <div><dt>Subtotal</dt><dd>{formatPrice(o.subtotal)}</dd></div>
-          {o.discount > 0 && <div className="summary__discount"><dt>First order −50%</dt><dd>−{formatPrice(o.discount)}</dd></div>}
-          <div><dt>{o.method === 'delivery' ? 'Delivery' : 'Pickup'}</dt><dd>{o.fee ? formatPrice(o.fee) : 'Free'}</dd></div>
-          <div className="summary__total"><dt>Total</dt><dd>{formatPrice(o.total)}</dd></div>
-        </dl>
-        <Link className="btn btn--outline btn--block" to="/">Continue shopping</Link>
+        <div className="stack">
+          <OrderChat orderId={o.id} side="customer" title="Message the seller" />
+          <Link className="btn btn--outline btn--block" to="/">Continue shopping</Link>
+        </div>
       </div>
     </AppShell>
   )
@@ -226,6 +246,7 @@ export function ProfilePage() {
     { label: 'Payment methods', action: () => notify('Coming soon') },
     { label: 'Language', meta: 'English', action: () => notify('Español is coming soon') },
     { label: 'Help & contact', action: () => notify('Support: coming soon') },
+    { label: 'Sell on Gexi', meta: 'Seller Center', href: 'seller.html' },
   ]
   return (
     <AppShell active="/profile" title="Profile">
@@ -240,7 +261,13 @@ export function ProfilePage() {
         <ul className="menu">
           {rows.map((r) => (
             <li key={r.label}>
-              {r.to ? (
+              {r.href ? (
+                <a href={r.href} className="menu__row">
+                  <span>{r.label}</span>
+                  <span className="muted">{r.meta}</span>
+                  <ChevronIcon size={18} />
+                </a>
+              ) : r.to ? (
                 <Link to={r.to} className="menu__row">
                   <span>{r.label}</span>
                   <span className="muted">{r.meta}</span>

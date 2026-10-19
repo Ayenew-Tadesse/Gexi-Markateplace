@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Link, navigate } from '../router'
+import { Link, navigate } from '../shared/router'
 import { useStore } from '../context/StoreContext'
 import { CATEGORIES } from '../data/products'
-import { BackIcon, CartIcon, HomeIcon, ReceiptIcon, SearchIcon, TagIcon, UserIcon } from './Icons'
+import { BackIcon, CartIcon, HomeIcon, ReceiptIcon, SearchIcon, TagIcon, UserIcon } from '../shared/Icons'
 
 const NAV = [
   { to: '/', label: 'Home', icon: HomeIcon },
@@ -13,7 +13,7 @@ const NAV = [
 ]
 
 function NavItems({ active, className }) {
-  const { cartCount } = useStore()
+  const { cartCount, unreadMessages } = useStore()
   return (
     <nav className={className} aria-label="Main">
       {NAV.map(({ to, label, icon: Icon }) => {
@@ -23,6 +23,7 @@ function NavItems({ active, className }) {
             <span className="nav-item__icon">
               <Icon size={24} />
               {to === '/cart' && cartCount > 0 && <span className="badge">{cartCount > 99 ? '99+' : cartCount}</span>}
+              {to === '/orders' && unreadMessages > 0 && <span className="badge" aria-label={`${unreadMessages} new messages`}>{unreadMessages}</span>}
             </span>
             <span className="nav-item__label">{label}</span>
           </Link>

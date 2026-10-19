@@ -1,7 +1,9 @@
-// Demo "backend": everything is kept in the browser (localStorage).
-// When Gexi goes live, these functions are the ones to swap for real API calls.
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { byId } from '../data/products'
+// Shopper state: account, cart and saved items live in this browser.
+// Products, orders and messages come from the shared database (src/shared/db.js),
+// which the Seller Center also uses.
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { byId, liveById } from '../data/products'
+import * as db from '../shared/db'
 
 const StoreContext = createContext(null)
 
@@ -28,17 +30,17 @@ function usePersisted(key, fallback) {
 }
 
 export function StoreProvider({ children }) {
+  db.useDb() // re-render when products, orders or messages change (also from other tabs)
   const [accounts, setAccounts] = usePersisted('accounts', [])
   const [user, setUser] = usePersisted('user', null)
   const [cart, setCart] = usePersisted('cart', [])
   const [saved, setSaved] = usePersisted('saved', [])
-  const [orders, setOrders] = usePersisted('orders', [])
   const [toast, setToast] = useState(null)
 
   const notify = useCallback((message) => {
-    const id = Date.now()
+    const id = Date.now() + Math.random()
     setToast({ id, message })
-    setTimeout(() => setToast((t) => (t && t.id === id ? null : t)), 2200)
+    setTimeout(() => setToast((t) => (t && t.id === id ? null : t)), 2600)
   }, [])
 
   // ---- Auth (demo) ----
@@ -69,7 +71,7 @@ export function StoreProvider({ children }) {
       }
       // Demo convenience: any phone/email + password signs you in as a guest shopper
       setUser({
-        id: 'guest',
+        id: 'guest-' + id,
         email: id.includes('@') ? id : '',
         phone: id.includes('@') ? '' : identifier.trim(),
         guest: true,
@@ -84,12 +86,14 @@ export function StoreProvider({ children }) {
   // ---- Cart ----
   const addToCart = useCallback(
     (productId, color, qty = 1) => {
-      const p = byId(productId)
-      const c = color || p.colors[0].name
+      const p = liveById(productId)
+      if (!p) return notify('Sorry, this product is no longer available')
+      if (p.stock <= 0) return notify('Sorry, this product is sold out')
+      const c = color || p.colors[0]?.name || 'Default'
       setCart((items) => {
         const found = items.find((i) => i.id === productId && i.color === c)
         if (found) return items.map((i) => (i === found ? { ...i, qty: Math.min(i.qty + qty, p.stock) } : i))
-        return [...items, { id: productId, color: c, qty }]
+        return [...items, { id: productId, color: c, qty: Math.min(qty, p.stock) }]
       })
       notify(`${p.name} added to cart`)
     },
@@ -116,36 +120,56 @@ export function StoreProvider({ children }) {
     [saved, setSaved, notify],
   )
 
-  // ---- Orders ----
+  // ---- Orders (shared with the Seller Center) ----
+  const orders = user ? db.getOrders().filter((o) => o.customer?.id === user.id) : []
+  const myOrderIds = orders.map((o) => o.id).join(',')
+
+  // Cart items that can still be bought
+  const buyable = cart.filter((i) => {
+    const p = liveById(i.id)
+    return p && p.stock > 0
+  })
+
   const placeOrder = useCallback(
     (summary) => {
-      const order = {
-        id: 'GX' + String(Date.now()).slice(-6),
-        date: new Date().toISOString(),
-        items: cart,
+      const order = db.createOrder({
+        items: buyable.map((i) => ({ ...i, qty: Math.min(i.qty, liveById(i.id).stock) })),
+        customer: { id: user.id, email: user.email, phone: user.phone },
         ...summary,
-        status: 'Processing',
-      }
-      setOrders((list) => [order, ...list])
+      })
       setCart([])
       return order
     },
-    [cart, setOrders, setCart],
+    [buyable, user, setCart],
   )
 
+  // Tell the shopper when the seller replies or updates an order (from another tab/device)
+  useEffect(() => {
+    if (!myOrderIds) return
+    const mine = new Set(myOrderIds.split(','))
+    return db.subscribe((e) => {
+      if (!e?.remote || e.key !== 'messages') return
+      const seen = new Set((e.before || []).map((m) => m.id))
+      const fresh = (e.after || []).filter((m) => !seen.has(m.id) && m.from !== 'customer' && mine.has(m.orderId))
+      if (fresh.length) {
+        const m = fresh[fresh.length - 1]
+        notify(m.from === 'seller' ? `Seller replied about #${m.orderId}` : `#${m.orderId}: ${m.text}`)
+      }
+    })
+  }, [myOrderIds, notify])
+
+  const unreadMessages = orders.reduce((n, o) => n + db.unreadCount('customer', o.id), 0)
   const cartCount = cart.reduce((n, i) => n + i.qty, 0)
-  const cartSubtotal = cart.reduce((sum, i) => sum + (byId(i.id)?.price || 0) * i.qty, 0)
+  const cartSubtotal = buyable.reduce((sum, i) => sum + (byId(i.id)?.price || 0) * i.qty, 0)
 
-  const value = useMemo(
-    () => ({
-      user, signUp, logIn, logOut,
-      cart, cartCount, cartSubtotal, addToCart, setQty, clearCart,
-      saved, toggleSaved,
-      orders, placeOrder,
-      toast, notify,
-    }),
-    [user, signUp, logIn, logOut, cart, cartCount, cartSubtotal, addToCart, setQty, clearCart, saved, toggleSaved, orders, placeOrder, toast, notify],
-  )
+  // Rebuilt on every render so pages always see the latest shared data
+  const value = {
+    user, signUp, logIn, logOut,
+    cart, cartCount, cartSubtotal, addToCart, setQty, clearCart,
+    saved, toggleSaved,
+    orders, placeOrder, unreadMessages,
+    toast, notify,
+  }
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }

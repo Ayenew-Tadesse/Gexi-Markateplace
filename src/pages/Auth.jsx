@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
-import { Link, navigate } from '../router'
+import { Link, navigate } from '../shared/router'
 import { useStore } from '../context/StoreContext'
-import { EyeIcon } from '../components/Icons'
+import { EyeIcon } from '../shared/Icons'
 
 function AuthFrame({ children, heading }) {
   return (
@@ -131,6 +131,7 @@ export function LoginPage() {
         Are you new here? <Link to="/signup">Sign Up</Link>
       </p>
       <p className="auth__demo">Demo: any phone/email and password will sign you in.</p>
+      <p className="auth__seller"><a href="seller.html">Sell on Gexi → Seller Center</a></p>
     </AuthFrame>
   )
 }

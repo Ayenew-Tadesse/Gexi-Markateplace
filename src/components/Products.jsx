@@ -1,9 +1,10 @@
-import { Link, navigate } from '../router'
+import { Link, navigate } from '../shared/router'
 import { useStore } from '../context/StoreContext'
 import { formatPrice } from '../data/products'
-import { HeartIcon } from './Icons'
+import { HeartIcon } from '../shared/Icons'
 
 export function ColorDots({ colors, selected, onSelect, size = 'sm' }) {
+  if (!colors?.length) return null
   return (
     <div className={`colors colors--${size}`}>
       <span className="colors__label">Colors</span>
@@ -74,7 +75,7 @@ export function ProductCard({ product }) {
       <div className="pcard__img">
         <img src={product.image} alt={product.name} loading="lazy" />
         <SaveButton id={product.id} />
-        {product.oldPrice && (
+        {product.oldPrice > product.price && (
           <span className="pcard__badge">-{Math.round((1 - product.price / product.oldPrice) * 100)}%</span>
         )}
       </div>
@@ -102,7 +103,7 @@ export function ProductRow({ product }) {
         <h3 className="pcard__title">{product.name}</h3>
         <p className="pcard__desc">{product.description}</p>
         <ColorDots colors={product.colors} />
-        {product.stock <= 5 && <p className="prow__stock">only {product.stock} left in stock</p>}
+        {product.stock <= 5 && <p className="prow__stock">{product.stock <= 0 ? 'Sold out' : `only ${product.stock} left in stock`}</p>}
         <div className="pcard__foot">
           <span className="price price--lg">{formatPrice(product.price)}</span>
           <AddButton product={product} />

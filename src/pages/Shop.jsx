@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { AppShell, Empty } from '../components/Layout'
 import { Banner, ColorDots, DealsPanel, ProductGrid, Stepper } from '../components/Products'
-import { HeartIcon, SearchIcon, StarIcon } from '../components/Icons'
+import { HeartIcon, SearchIcon, StarIcon } from '../shared/Icons'
 import { useStore } from '../context/StoreContext'
-import { Link, navigate } from '../router'
-import { CATEGORIES, HOME_SECTIONS, PRODUCTS, byCategory, byId, formatPrice } from '../data/products'
+import { Link, navigate } from '../shared/router'
+import { CATEGORIES, HOME_SECTIONS, allProducts, byCategory, liveById, formatPrice } from '../data/products'
 
-const pick = (ids) => ids.map(byId)
+const pick = (ids) => ids.map(liveById).filter(Boolean)
 
 function Section({ title, to, children }) {
   return (
@@ -38,6 +38,9 @@ function Sponsored() {
 export function HomePage() {
   // Category sections at the bottom (the "Categories" blocks in the design)
   const used = new Set(Object.values(HOME_SECTIONS).flat())
+  // Newest seller listings get their own row at the top
+  const fresh = allProducts().filter((p) => !p.seed).slice(0, 4)
+  const S = Object.fromEntries(Object.entries(HOME_SECTIONS).map(([k, ids]) => [k, pick(ids)]))
   const catBlocks = CATEGORIES.filter((c) => c.id !== 'all')
     .map((c) => ({ ...c, items: byCategory(c.id).filter((p) => !used.has(p.id)) }))
     .filter((c) => c.items.length)
@@ -46,13 +49,20 @@ export function HomePage() {
     <AppShell active="/" variant="home">
       <div className="container stack">
         <Banner />
-        <DealsPanel title="Today’s Deals" products={pick(HOME_SECTIONS.deals)} />
-        <Section title="Trending Now">
-          <ProductGrid products={pick(HOME_SECTIONS.trending)} />
-        </Section>
+        {fresh.length > 0 && (
+          <Section title="Just Listed">
+            <ProductGrid products={fresh} />
+          </Section>
+        )}
+        {S.deals.length > 0 && <DealsPanel title="Today’s Deals" products={S.deals} />}
+        {S.trending.length > 0 && (
+          <Section title="Trending Now">
+            <ProductGrid products={S.trending} />
+          </Section>
+        )}
         <Sponsored />
-        <ProductGrid products={pick(HOME_SECTIONS.picks)} />
-        <DealsPanel title="Best Sellers" products={pick(HOME_SECTIONS.bestSellers)} />
+        {S.picks.length > 0 && <ProductGrid products={S.picks} />}
+        {S.bestSellers.length > 0 && <DealsPanel title="Best Sellers" products={S.bestSellers} />}
         <Banner title="Fresh Kicks" text="Up to 30% off sneakers this week" buttonBottom />
         <h2 className="section__title section__title--big">Categories</h2>
         {catBlocks.map((c) => (
@@ -107,7 +117,7 @@ export function CategoryPage({ id }) {
 }
 
 export function DealsPage() {
-  const deals = PRODUCTS.filter((p) => p.oldPrice)
+  const deals = allProducts().filter((p) => p.oldPrice > p.price)
   return (
     <AppShell active="/" variant="home">
       <div className="container stack">
@@ -121,7 +131,7 @@ export function DealsPage() {
 
 export function SearchPage({ q }) {
   const term = q.toLowerCase()
-  const results = PRODUCTS.filter((p) =>
+  const results = allProducts().filter((p) =>
     [p.name, p.description, p.category].some((s) => s.toLowerCase().includes(term)),
   )
   return (
@@ -139,9 +149,9 @@ export function SearchPage({ q }) {
 }
 
 export function ProductPage({ id }) {
-  const p = byId(id)
+  const p = liveById(id)
   const { addToCart, saved, toggleSaved } = useStore()
-  const [color, setColor] = useState(p?.colors[0].name)
+  const [color, setColor] = useState(p?.colors[0]?.name)
   const [qty, setQty] = useState(1)
   if (!p) return <NotFound />
   const isSaved = saved.includes(p.id)
@@ -157,16 +167,21 @@ export function ProductPage({ id }) {
           <div className="pdp__info">
             <h1 className="pdp__title">{p.name}</h1>
             <div className="pdp__rating">
-              <StarIcon size={16} /> {p.rating.toFixed(1)}
-              <span className="muted"> · {p.stock <= 5 ? `only ${p.stock} left in stock` : 'In stock'}</span>
+              {p.rating > 0 ? <><StarIcon size={16} /> {p.rating.toFixed(1)}</> : <span className="pdp__new">New</span>}
+              <span className="muted"> · {p.stock <= 0 ? 'Sold out' : p.stock <= 5 ? `only ${p.stock} left in stock` : 'In stock'}</span>
             </div>
             <div className="pdp__price">
               <span className="price price--xl">{formatPrice(p.price)}</span>
-              {p.oldPrice && <s className="muted">{formatPrice(p.oldPrice)}</s>}
+              {p.oldPrice > p.price && <s className="muted">{formatPrice(p.oldPrice)}</s>}
             </div>
             <p className="pdp__desc">{p.description}</p>
-            <ColorDots colors={p.colors} selected={color} onSelect={setColor} size="lg" />
-            <p className="muted pdp__chosen">Selected: {color}</p>
+            {p.colors.length > 0 && (
+              <>
+                <ColorDots colors={p.colors} selected={color} onSelect={setColor} size="lg" />
+                <p className="muted pdp__chosen">Selected: {color}</p>
+              </>
+            )}
+            <p className="muted small">Sold by {p.sellerName || 'Gexi Demo Store'}</p>
             <div className="pdp__qty">
               <span>Quantity</span>
               <Stepper value={qty} max={p.stock} onChange={(n) => setQty(Math.max(1, Math.min(n, p.stock)))} />

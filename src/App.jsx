@@ -1,12 +1,14 @@
 import { useEffect } from 'react'
-import { match, navigate, useRoute } from './router'
+import { match, navigate, useRoute } from './shared/router'
 import { useStore } from './context/StoreContext'
+import { useDb } from './shared/db'
 import { Toast } from './components/Layout'
 import { LoginPage, SignupPage } from './pages/Auth'
 import { CategoryPage, DealsPage, HomePage, NotFound, ProductPage, SearchPage } from './pages/Shop'
 import { CartPage, OrderDetailPage, OrdersPage, ProfilePage, SavedPage } from './pages/Account'
 
 function Page() {
+  useDb() // redraw the page when products/orders change (e.g. a seller edits a price)
   const { path, query } = useRoute()
   const { user } = useStore()
 

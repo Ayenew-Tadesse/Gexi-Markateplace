@@ -1,5 +1,7 @@
-// Sample catalog for the demo. Swap these out for real products (or a database) later.
+// Sample catalog for the demo. It seeds the shared database (src/shared/db.js) the first
+// time the site opens; after that, sellers manage products in the Seller Center.
 // `image` paths point to files in /public/products.
+import { getLiveProducts, getProduct } from '../shared/db'
 
 export const CATEGORIES = [
   { id: 'all', label: 'All' },
@@ -11,7 +13,7 @@ export const CATEGORIES = [
 ]
 
 // Swatch palette taken from the design (white, teal, gold, brown, charcoal)
-const C = {
+export const COLORS = {
   white: { name: 'White', hex: '#ffffff' },
   teal: { name: 'Teal', hex: '#188294' },
   gold: { name: 'Gold', hex: '#a07a1e' },
@@ -25,9 +27,10 @@ const C = {
   mint: { name: 'Mint', hex: '#9ed9cf' },
   silver: { name: 'Silver', hex: '#c9ced3' },
 }
+const C = COLORS
 const ALL = [C.white, C.teal, C.gold, C.brown, C.charcoal]
 
-export const PRODUCTS = [
+export const SEED_PRODUCTS = [
   // Outfits
   { id: 'madden-green', name: 'Madden Green Brogue', category: 'outfits', price: 109.99, oldPrice: 139.99, image: 'products/green-suede-shoe.jpg', colors: [C.green, C.brown, C.charcoal], stock: 12, rating: 4.6,
     description: 'Soft suede brogue with a cushioned sole. Dresses up jeans or chinos for any occasion.' },
@@ -103,8 +106,13 @@ export const PRODUCTS = [
     description: 'Fresh-baked lemon cupcakes with whipped vanilla frosting.' },
 ]
 
-export const byId = (id) => PRODUCTS.find((p) => p.id === id)
-export const byCategory = (cat) => (cat === 'all' ? PRODUCTS : PRODUCTS.filter((p) => p.category === cat))
+// Live lookups (read from the shared database, so seller changes show up)
+export const allProducts = () => getLiveProducts()
+/** Finds any product, including hidden/removed ones (used by carts and orders) */
+export const byId = (id) => getProduct(id)
+/** Finds a product only if shoppers can see it */
+export const liveById = (id) => getLiveProducts().find((p) => p.id === id)
+export const byCategory = (cat) => (cat === 'all' ? getLiveProducts() : getLiveProducts().filter((p) => p.category === cat))
 
 // Curated sections on the home page (mirrors the layout of the Home Page design)
 export const HOME_SECTIONS = {
@@ -114,4 +122,4 @@ export const HOME_SECTIONS = {
   bestSellers: ['smartwatch', 'perfume', 'mint-headphones'],
 }
 
-export const formatPrice = (n) => `$${n.toFixed(2)}`
+export { formatPrice } from '../shared/db'
